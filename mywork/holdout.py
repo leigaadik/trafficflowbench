@@ -84,11 +84,27 @@ def holdout_scope(restrict_fit: bool = True):
     s1.masked_files = lambda release, panel, split, regime: [
         p for p in original_masked(release, panel, split, regime) if is_eval_file(p)
     ]
+
+    # Task 3 walks the whole split through its own imported `files`, so it needs
+    # the same treatment or it would score nine months instead of the holdout.
+    try:
+        from task3 import score_task3 as s3
+    except Exception:
+        s3 = None
+    original_s3_files = None
+    if s3 is not None:
+        original_s3_files = s3.files
+        s3.files = lambda panel_dir, split: [
+            p for p in original_s3_files(panel_dir, split) if is_eval_file(p)
+        ]
+
     try:
         yield
     finally:
         bhm.files = original_files
         s1.masked_files = original_masked
+        if s3 is not None:
+            s3.files = original_s3_files
 
 
 def panels(release: Path = None) -> list[str]:
