@@ -123,6 +123,37 @@ python mywork/calibrate_t3.py --release-root data/kaggle_public \
 counts，这一项已饱和。`S_od` / `S_dev` / `S_attr` 需要 `base_od.csv`，而该文件
 在数据包中不存在。加上 T4 总提升空间仅 0.033，性价比最低，建议不碰。
 
+## 完整离线评估流程
+
+前置产物（已生成，勿删）：
+
+```
+reports/submit/flux_conservation_all.parquet        T3 边界通量，10 条走廊
+reports/submit/queue_targets_train.parquet          T2 重建标签
+reports/submit/baseline_holdout_all.csv             baseline 的 T1 提交（前 8 月 fit）
+```
+
+一次评估全部任务：
+
+```bash
+~/miniconda3/envs/trafficflowbench/bin/python mywork/evaluate.py \
+  --release-root data/kaggle_public \
+  --state  reports/submit/state_submission.csv \
+  --queue  reports/submit/queue_submission.csv \
+  --odme   reports/submit/odme/baseline_submission.csv
+```
+
+迭代时加 `--panel D12_I5_N` 只跑一条走廊（约 1 分钟，全量约 12 分钟）。
+每个任务都会与 `mywork/anchors.json` 里的 baseline 对出 delta。
+
+几点约定：
+
+- 省略某个任务就跳过，不会按 0 计入
+- 传了 `--state` 就会顺带评 T3（同一份文件评两次）
+- T4 只报 `S_link`，并明确标注 `S_od/S_dev/S_attr` 无法本地评估
+- 总分那行 **T4 用线上 baseline 0.8359 占位**，所以它是"三任务真实分 + T4 常量"，
+  不是可提交的总分，仅供看趋势
+
 ## 下一步
 
 - [ ] 用本地 T1/T2 评估做第一个改进（T1 时空融合；T2 队列传播）

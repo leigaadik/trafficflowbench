@@ -47,9 +47,10 @@ ONLINE = {"zero": 0.0, "baseline": 0.3549, "truth": 0.9636}
 
 
 def score_one(release: Path, panel: str, submission: Path, flux: Path | None,
-              split: str = "train") -> dict:
+              split: str = "train", state: pd.DataFrame | None = None) -> dict:
     modes = json.loads((_SRC.parent / "config" / "task3_lwr_modes.json").read_text(encoding="utf-8"))
-    state = read_csv_checked(Path(submission).resolve(), STATE_COLUMNS, "state submission")
+    if state is None:
+        state = read_csv_checked(Path(submission).resolve(), STATE_COLUMNS, "state submission")
     panel_dir = release / "corridors" / panel
     params = network_parameters(panel_dir).set_index("link_id")
     order = link_order(panel_dir, split)
@@ -99,8 +100,11 @@ def main() -> None:
     print(f"boundary flux: {args.boundary_flux or 'NONE (topology fallback)'}")
     for name, path in args.submission:
         scores = []
+        # Read once per submission, not once per panel: the full-train file is
+        # tens of millions of rows.
+        shared = read_csv_checked(Path(path).resolve(), STATE_COLUMNS, "state submission")
         for panel in panels:
-            s = score_one(release, panel, Path(path), args.boundary_flux)
+            s = score_one(release, panel, Path(path), args.boundary_flux, state=shared)
             scores.append(s)
             print(f"  {name:9s} {panel:11s} S_physics={s['S_physics']:.4f} "
                   f"(S_FD={s['S_FD']:.4f} S_LWR={s['S_LWR']:.4f} "

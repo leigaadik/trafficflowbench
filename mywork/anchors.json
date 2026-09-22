@@ -1,0 +1,68 @@
+{
+  "_comment": "Historical-mean / persistence / nnls baselines on the local holdout (fit <= 2031-01-31, eval = 2031-02). Used as the zero point for every delta reported by evaluate.py. Regenerate with calibrate_t1.py, score_task2.py and calibrate_t3.py. Read as relative, not absolute: the holdout month is easier than validation.",
+
+  "state": {
+    "D7_I10_E": 0.7207,
+    "D7_I10_W": 0.8108,
+    "D7_I210_E": 0.8988,
+    "D7_I210_W": 0.7890,
+    "D7_I405_N": 0.5140,
+    "D7_I405_S": 0.6535,
+    "D12_I5_N": 0.6572,
+    "D12_I5_S": 0.6359,
+    "D12_I405_N": 0.8341,
+    "D12_I405_S": 0.7919
+  },
+
+  "queue": {
+    "D7_I10_E": 0.2923,
+    "D7_I10_W": 0.2260,
+    "D7_I210_E": 0.3149,
+    "D7_I210_W": 0.3382,
+    "D7_I405_N": 0.3574,
+    "D7_I405_S": 0.2815,
+    "D12_I5_N": 0.2883,
+    "D12_I5_S": 0.3605
+  },
+
+  "physics": {
+    "D7_I10_E": 0.3246,
+    "D7_I10_W": 0.3833,
+    "D7_I210_E": 0.5620,
+    "D7_I210_W": 0.4040,
+    "D7_I405_N": 0.3190,
+    "D7_I405_S": 0.3239,
+    "D12_I5_N": 0.3244,
+    "D12_I5_S": 0.3230,
+    "D12_I405_N": 0.3770,
+    "D12_I405_S": 0.4381
+  },
+
+  "_e_lwr_note": "S_LWR is pinned at 0 whenever E_LWR > 1, so the panel is blind to small improvements. Track E_LWR instead - lower is better, and it moves continuously.",
+  "e_lwr": {
+    "D7_I10_E": 1.696,
+    "D7_I10_W": 1.320,
+    "D7_I210_E": 0.650,
+    "D7_I210_W": 1.094,
+    "D7_I405_N": 2.784,
+    "D7_I405_S": 1.763,
+    "D12_I5_N": 2.417,
+    "D12_I5_S": 2.765,
+    "D12_I405_N": 1.049,
+    "D12_I405_S": 0.941
+  },
+
+  "odme": {
+    "_note": "S_link only, saturated at ~1.0 - no headroom left here. S_od / S_dev / S_attr need the withheld path flows and are not scored locally.",
+    "D7_I10_E": 1.0000,
+    "D7_I10_W": 1.0000,
+    "D7_I210_E": 1.0000,
+    "D7_I210_W": 0.9999,
+    "D7_I405_N": 1.0000,
+    "D7_I405_S": 1.0000,
+    "D12_I5_N": 1.0000,
+    "D12_I5_S": 1.0000,
+    "D12_I405_N": 0.9999,
+    "D12_I405_S": 0.9997
+  }
+}
