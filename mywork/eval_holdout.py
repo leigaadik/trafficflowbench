@@ -34,6 +34,17 @@ from holdout import panels as known_panels
 from task1.baseline_task1_historical_mean import DEFAULT_RELEASE
 from task1.score_task1 import read_submission, score_panel
 
+# Historical-mean baseline per panel on the holdout month (fit <= 2031-01-31).
+# Compare against the mean of the panels you actually scored, not the ten-panel
+# number: panels differ hugely (0.514 to 0.899), so scoring one corridor and
+# reading a ten-panel delta tells you nothing.
+PANEL_BASELINE = {
+    "D7_I10_E": 0.7207, "D7_I10_W": 0.8108, "D7_I210_E": 0.8988,
+    "D7_I210_W": 0.7890, "D7_I405_N": 0.5140, "D7_I405_S": 0.6535,
+    "D12_I5_N": 0.6572, "D12_I5_S": 0.6359, "D12_I405_N": 0.8341,
+    "D12_I405_S": 0.7919,
+}
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -67,10 +78,19 @@ def main() -> None:
         })
 
     report = pd.DataFrame(rows)
+    report["baseline"] = report.panel.map(PANEL_BASELINE)
+    report["delta"] = (report.S_state - report.baseline).round(4)
     print(report.to_string(index=False))
-    print(f"\nmean S_state = {report.S_state.mean():.4f}   "
-          f"(baseline anchor 0.7306, delta {report.S_state.mean() - 0.7306:+.4f})")
+
+    anchor = float(report.baseline.mean())
+    current = float(report.S_state.mean())
+    print(f"\nmean S_state = {current:.4f}   baseline({len(report)} panel(s)) = {anchor:.4f}"
+          f"   delta = {current - anchor:+.4f}")
     print(f"eval window: {EVAL_START} .. {EVAL_END}")
+    worst = report.nsmallest(1, "delta")
+    if not worst.empty and worst.delta.iloc[0] < -0.02:
+        print(f"NOTE: {worst.panel.iloc[0]} dropped {abs(worst.delta.iloc[0]):.4f} - "
+              "check per-panel rows, the mean hides local regressions.")
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
