@@ -90,17 +90,67 @@ def truth_state(release: Path, panel: str, split: str = "train") -> pd.DataFrame
     if not paths:
         raise FileNotFoundError(f"{panel}: no unmasked partitions in the eval month")
     pieces = [
-        pd.read_parquet(p, columns=["timestamp", "link_id", "flow_vph", "is_score_eligible"])
+        pd.read_parquet(p, columns=["timestamp", "link_id", "flow_vph",
+                                    "speed_kmh", "is_score_eligible"])
         for p in paths
     ]
     frame = pd.concat(pieces, ignore_index=True)
     frame["link_id"] = frame.link_id.astype(str)
     frame["timestamp"] = pd.to_datetime(frame.timestamp, utc=True)
     frame = frame[frame.is_score_eligible.astype(bool)]
-    frame["flow_vph"] = pd.to_numeric(frame.flow_vph, errors="coerce")
-    frame = frame.dropna(subset=["flow_vph"])
+    for c in ("flow_vph", "speed_kmh"):
+        frame[c] = pd.to_numeric(frame[c], errors="coerce")
+    frame = frame.dropna(subset=["flow_vph", "speed_kmh"])
     # Several detector stations can sit on one link; the evaluator also averages.
-    return frame.groupby(["timestamp", "link_id"], as_index=False).flow_vph.mean()
+    return frame.groupby(["timestamp", "link_id"], as_index=False)[
+        ["flow_vph", "speed_kmh"]].mean()
+
+
+def boundary_from_conservation(state: pd.DataFrame, panel_dir: Path,
+                               ramps: pd.DataFrame) -> pd.DataFrame:
+    """Boundary fluxes that make the conservation identity exact for truth.
+
+    The identity is
+        N(t+dt) - N(t) = dt*(q_in + r_on - q_out - r_off)
+    and on the train split N is computable from the released unmasked layer, so
+    the only unknown is the net mainline flux. Solving for it:
+        q_in - q_out = dN/dt - r_on + r_off
+    Pinning q_out to the link's own measured flow and putting the whole
+    correction on q_in gives a flux pair that reproduces truth exactly.
+
+    This is legitimate as an evaluation device because the flux is derived only
+    from released truth, never from a submission - the same standing that
+    mainline_states has as Task 1 truth. It is not a way to produce a better
+    answer; it is the ruler.
+    """
+    from task3.score_task3 import network_parameters
+
+    params = network_parameters(panel_dir).set_index("link_id")
+    s = state.merge(params[["length_km"]].reset_index(), on="link_id", how="left")
+    s = s.dropna(subset=["length_km"])
+    # Density is an identity (k = q/v) and accumulation is k*L, matching the
+    # evaluator's own derivation in derive_physics.
+    s["N"] = (s.flow_vph / s.speed_kmh.clip(lower=1.0)) * s.length_km
+    s = s.sort_values(["link_id", "timestamp"])
+    s["dN"] = s.groupby("link_id").N.shift(-1) - s.N
+    s["dt"] = (s.groupby("link_id").timestamp.shift(-1) - s.timestamp).dt.total_seconds() / 3600.0
+    s = s[(s.dt > 0) & (s.dt <= 5.1 / 60.0)].copy()
+
+    if not ramps.empty:
+        s = s.merge(ramps, on=["timestamp", "link_id"], how="left")
+    for c in ("on_ramp_flow_vph", "off_ramp_flow_vph"):
+        if c not in s.columns:
+            s[c] = 0.0
+        s[c] = pd.to_numeric(s[c], errors="coerce").fillna(0.0)
+
+    net = s.dN / s.dt - s.on_ramp_flow_vph + s.off_ramp_flow_vph
+    return pd.DataFrame({
+        "timestamp": s.timestamp,
+        "link_id": s.link_id.astype(str),
+        # q_out is the link's own flow; q_in carries the correction.
+        "inflow_vph": s.flow_vph + net,
+        "outflow_vph": s.flow_vph,
+    })
 
 
 def main() -> None:
@@ -108,9 +158,12 @@ def main() -> None:
     ap.add_argument("--release-root", type=Path, required=True)
     ap.add_argument("--panel", action="append", default=None)
     ap.add_argument("--split", default="train", choices=["train", "validation", "private"])
-    ap.add_argument("--outflow-mode", default="self", choices=["self", "downstream"],
-                    help="'self' (default) treats a link's outflow as its own measured "
-                         "flow; 'downstream' reproduces the upstream fallback")
+    ap.add_argument("--outflow-mode", default="conservation",
+                    choices=["conservation", "self", "downstream"],
+                    help="'conservation' (default) solves the identity for the net flux "
+                         "using true accumulation, so truth satisfies it exactly; 'self' "
+                         "treats a link's outflow as its own flow; 'downstream' "
+                         "reproduces the upstream fallback")
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()
     release = args.release_root.resolve()
@@ -120,9 +173,14 @@ def main() -> None:
 
     out = []
     for panel in panels:
+        panel_dir = release / "corridors" / panel
         state = truth_state(release, panel, args.split)
-        flux = boundary_from_topology(state, release / "corridors" / panel,
-                                      args.outflow_mode)
+        if args.outflow_mode == "conservation":
+            from task3.score_task3 import load_ramp_flows
+            ramps = load_ramp_flows(panel_dir, args.split)
+            flux = boundary_from_conservation(state, panel_dir, ramps)
+        else:
+            flux = boundary_from_topology(state, panel_dir, args.outflow_mode)
         flux["panel"] = panel
         out.append(flux)
         print(f"  {panel}: {len(flux):,} flux rows", flush=True)

@@ -51,7 +51,7 @@ Local holdout: `fit` = train 前 8 个月（≤ 2031-01-31），`eval` = 2031-02
 |---|---:|---:|---:|---|
 | `S_state` (T1) | 0.7306 | 0.6929 | +0.0377 | ✅ 可用，两端标定精确落在 0 / 1.0 |
 | `S_queue` (T2) | 0.3074 | 0.3017 | **+0.0057** | ✅ 高度可信 |
-| `S_physics` (T3) | 0.3244 | 0.3549 | -0.0305 | ❌ `S_LWR` 无法复活，见下 |
+| `S_physics` (T3) | 0.3244 / 真值 0.9969 | 0.3549 / 真值 0.9636 | 判别幅度 0.673 vs 0.609 | ✅ 可行，见下 |
 | `S_link` (T4 的 0.25) | 0.9999 | — | — | ⚠️ 已饱和 |
 | `S_ODME` (T4) | 不可算 | 0.8359 | — | ❌ 无 OD 真值 |
 
@@ -71,27 +71,51 @@ python src/task2/score_task2.py --submission <csv> --release-root data/kaggle_pu
 唯一瑕疵：标签取自观测层而非 underlying state，且 `fd_parameters.csv` 没有
 `v_cut` 列，退化为 `0.6 * free_speed`。两者对阈值附近的判定有轻微影响。
 
-### Task 3：本地评估不可行（已尝试并定位原因）
+### Task 3：可行，靠反解净流入
 
-用 train 真值流量构造边界通量喂给 `--boundary-flux`，真值提交的 `S_LWR`
-仍然只有 0.0006，`E_LWR = 0.999`。诊断脚本给出确定原因：
+**失败的第一条路**（记录以免重走）：用「拓扑 + 观测流量」推边界通量，真值
+`S_LWR` 仍只有 0.0006。诊断显示 `sum|dN| = 544,503` 而 `sum|rhs| = 108,138,465`
+——拓扑里 `incoming/outgoing` 混着 `CONN-*` 这类无观测的连接器，直接求和量级就
+翻倍，再加上观测噪声，残差彻底淹没信号。
+
+**可行的方法**：守恒式里真正的未知只有净流入，而 eval 月的 `N` 能从真值算出来，
+于是可以反解：
 
 ```
-mean accumulation N    11.5 veh
-sum|dN|                544,503      ← 守恒要解释的信号
-sum|rhs|               108,138,465  ← 观测推出的量
-E_LWR                  0.9994
+dN_true = dt*(q_in + r_on - q_out - r_off)
+⇒  q_in - q_out = dN_true/dt - r_on + r_off
 ```
 
-单 link 层面更清楚（`L5N-182`）：`mean|dN| = 0.656 veh`，而
-`mean dt*|q_up - q| = 8.534 veh`。**噪声比信号大一个数量级。**
+把 `q_out` 钉在本 link 自己的流量上、修正量全给 `q_in`，得到的通量对真值精确
+成立。它只由真值数据决定、与提交无关——和 `mainline_states` 作为 T1 真值是同一
+性质，不是循环论证。
 
-文档说守恒信号约为积累量的 0.75%，即 N≈10 veh 时约 0.075 veh，而观测噪声在
-10 veh 量级——相差上百倍。train 只发布带噪声的观测层，守恒恒等式只在无噪声的
-underlying state 上成立，而那是 organizer 独有的。
+```bash
+python mywork/build_boundary_flux.py --release-root data/kaggle_public \
+    --output reports/submit/flux_conservation.parquet     # 默认 --outflow-mode conservation
+python mywork/calibrate_t3.py --release-root data/kaggle_public \
+    --boundary-flux reports/submit/flux_conservation.parquet \
+    --submission truth <csv> --submission baseline <csv>
+```
 
-**结论：放弃 T3 本地评估。** 提升它只能靠改进 T1（同一份文件评两次），
-并用线上榜单验证。相关脚本保留在 `mywork/` 供复查。
+结果（D12_I5_N）：
+
+| 输入 | 本地 | 线上 |
+|---|---:|---:|
+| baseline | 0.3244 | 0.3549 |
+| 真值 | 0.9969 | 0.9636 |
+| 判别幅度 | **0.673** | 0.609 |
+
+**重要：优化时盯 `E_LWR`，不要盯 `S_LWR`。** `S_LWR = max(0, 1-min(1,E_LWR))`
+在 `E_LWR > 1` 时恒为 0，存在死区。用真值/baseline 按 α 混合验证过：
+
+| α（真值占比） | 0 | 0.25 | 0.50 | 0.75 | 0.90 | 1.0 |
+|---|---:|---:|---:|---:|---:|---:|
+| `E_LWR` | 2.417 | 1.936 | 1.438 | 0.853 | 0.401 | 0.000 |
+| `S_LWR` | 0 | 0 | 0 | 0.147 | 0.599 | 1.000 |
+
+`E_LWR` 全区间连续单调；`S_LWR` 要 α≳0.6 才开始动。所以小幅改进应看
+`E_LWR` 是否下降。
 
 ### Task 4：无需投入
 
